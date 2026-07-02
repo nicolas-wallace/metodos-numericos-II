@@ -1,0 +1,141 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage{iftex}
+\ifPDFTeX
+    \usepackage[utf8]{inputenc}
+    \usepackage[T1]{fontenc}
+    \usepackage{mathpazo} % Palatino font
+\else
+    \usepackage{fontspec}
+    \setmainfont{Times New Roman}
+\fi
+\usepackage[brazilian]{babel}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[linesnumbered,ruled,vlined,portuguese]{algorithm2e}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{setspace}
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue]{hyperref}
+
+\geometry{margin=2.5cm}
+\onehalfspacing
+
+% Colors for code blocks
+\definecolor{codebg}{rgb}{0.96,0.96,0.96}
+\definecolor{codekey}{rgb}{0.0,0.4,0.8}
+\definecolor{codestr}{rgb}{0.6,0.1,0.1}
+\definecolor{codecom}{rgb}{0.4,0.6,0.4}
+
+\lstset{
+    backgroundcolor=\color{codebg},
+    commentstyle=\itshape\color{codecom},
+    keywordstyle=\bfseries\color{codekey},
+    stringstyle=\color{codestr},
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    frame=single,
+    rulecolor=\color{lightgray},
+    captionpos=b,
+    tabsize=4
+}
+
+\title{
+    \vspace{-1cm}
+    \begin{center}
+        \Large \textbf{Universidade Federal do Ceará -- UFC} \\
+        \large Departamento de Computação \\
+        \vspace{1cm}
+        \Huge \textbf{Métodos Numéricos II} \\
+        \vspace{0.5cm}
+        \Large \textit{Relatório da Unidade 2: Integração Numérica}
+    \end{center}
+}
+\author{
+    Nicolas Wallace Amorim Perote -- Matrícula: 566512 \\
+    Samyra Vitória Lima de Almeida -- Matrícula: 521240
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Introdução}
+O cálculo de integrais definidas do tipo $I = \int_a^b f(x)\,dx$ constitui uma das tarefas mais onipresentes na engenharia, física computacional e ciência de dados. Contudo, em inúmeros contextos, a primitiva da função integranda é intratável, ou a função possui pontos singulares de complexa avaliação, exigindo abordagens algorítmicas de aproximação iterativa.
+
+O presente documento expõe as atividades da \textbf{Unidade 2} e engloba o desenvolvimento de uma suíte completa e escalável de integração numérica em \textit{Python}, utilizando vetorialização nativa com \texttt{NumPy}. Foram contemplados os tradicionais métodos baseados em pontos igualmente espaçados (Newton-Cotes), malhas adaptativas geradas por raízes de polinômios ortogonais (Quadraturas de Gauss), transformações hiperbólicas para controle de polos (Integração Exponencial) e a generalização do Teorema de Fubini em malhas $N$-dimensionais (Integrais Duplas).
+
+A implementação foi estruturada sob os preceitos de Orientação a Objetos, garantindo encapsulamento, generalização (por exemplo, na aplicação automática das regras \textit{compostas}) e extrema clareza semântica, uma evolução significativa se comparada a abordagens em múltiplos \textit{scripts} procedurais.
+
+\section{Fórmulas de Newton-Cotes}
+As fórmulas de Newton-Cotes resolvem a integração de $f(x)$ substituindo a função por um polinômio de grau $n$ (via interpolação de Lagrange) em nós perfeitamente eqüidistantes no domínio $[a, b]$. A suíte implementa nativamente o suporte para \textbf{intervalos compostos}: o domínio inicial é subdividido e, em cada subseção, as regras simples (Trapézio, Simpson, Boole, etc.) são aplicadas localmente.
+
+Diferenciamos as metodologias entre \textit{fechadas} (onde os limites superior e inferior também são nós de avaliação) e \textit{abertas} (avaliando apenas os pontos interiores, algo especialmente profícuo quando existem indeterminações algébricas em $x=a$ ou $x=b$).
+
+\begin{lstlisting}[language=Python, caption={Extrato: Suporte a fórmulas compostas de Newton-Cotes.}]
+class NewtonCotes:
+    @staticmethod
+    def _composite(func, a, b, n, rule):
+        h = (b - a) / n
+        return sum(rule(func, a + i * h, a + (i + 1) * h) for i in range(n))
+\end{lstlisting}
+
+Por exemplo, aplicando-se a regra de Simpson $1/3$ à função de teste $f(x) = (\sin(2x) + 4x^2 + 3x)^2$ em $[0, 1]$, cuja resposta analítica rigorosa converge para $\approx 17.8764703$, obtemos os seguintes resíduos práticos em execução:
+\begin{itemize}
+    \item \textbf{Trapézio} (100 partições): $17.877811$
+    \item \textbf{Simpson 1/3} (10 partições): $17.876473$
+    \item \textbf{Regra de Boole} (5 partições): $17.876470$
+\end{itemize}
+Fica cristalino que a elevação do grau subjacente ao interpolador (na regra de Boole, utiliza-se $n=4$) drásticamente abate a necessidade de excessivas partições, proporcionando estabilidade imediata.
+
+\section{Quadratura Gaussiana}
+As limitações atreladas à imposição de malhas unifomemente espaçadas deram lugar às otimizações de Carl Friedrich Gauss. Ao permitirmos que as posições dos nós ($x_i$) e os respectivos pesos numéricos ($w_i$) entrem como variáveis estritamente livres num sistema polinomial, uma quadratura de grau $N$ é capaz de integrar sem nenhum erro intrínseco polinômios de até grau $2N-1$.
+
+Na biblioteca desenvolvida, a resolução das raízes e os pesos dinâmicos foram instanciados recorrendo às funções acopladas em \texttt{numpy.polynomial}, proporcionando suporte paramétrico a múltiplos métodos:
+\begin{itemize}
+    \item \textbf{Gauss-Legendre}: Utilizado para $I \in [a, b]$ clássicos, transformando-os biunivocamente em $[-1, 1]$.
+    \item \textbf{Gauss-Hermite}: Adequado a limites infinitos e subjacentes a funções estatísticas do tipo $f(x)e^{-x^2}$.
+    \item \textbf{Gauss-Laguerre}: Voltado a distribuições de decaimento exponencial $f(x)e^{-x}$ de $[0, \infty]$.
+    \item \textbf{Gauss-Chebyshev}: Com pesos imutáveis $w = \frac{\pi}{n}$, domina integrais afetadas por denominador em forma de arco.
+\end{itemize}
+
+O desempenho destes estimadores é notório. A integração de Gauss-Legendre de grau $n=4$ para o mesmo polinômio de teste supracitado retornou exatamente $17.876480$, alcançando o platô com avaliações consideravelmente inferiores às requeridas em Newton-Cotes Composta.
+
+\section{Tratamento Analítico de Singularidades}
+Se a função divergir vertiginosamente nos extremos da integral ($f(x) \to \infty$ quando $x \to 0$, por exemplo), os métodos fechados clássicos geram erro aritmético catastrófico de \texttt{DivisionByZero}. 
+O escape teórico é o mapeamento hiperbólico. Através do Jacobiano de transformações não-lineares, "esticamos" o espaço do infinito concentrando amostras densamente em volta dos polos. 
+
+Implementamos o método da \textbf{Exponencial Simples} via tangente hiperbólica ($x(t) \propto \tanh(t)$) e a respectiva evolução, a \textbf{Duplo Exponencial}, baseada na superposição de senos hiperbólicos ($x(t) \propto \tanh(\sinh(t))$).
+
+Ao aplicarmos as rotinas à integral singular $\int_0^1 x^{-1/2}dx = 2$, os algoritmos provaram sua eficácia evadindo a origem pura e computando o limite lateral com erro residual de alguns pontos percentuais, mesmo cortando deliberadamente as caudas em um $T=3.5$.
+
+\begin{lstlisting}[language=Python, caption={Trecho: Transformação Exponencial Simples.}]
+class ExponentialTransforms:
+    @staticmethod
+    def simple_exponential(f, a, b, n, T=3.5):
+        h = 2 * T / n
+        t = np.linspace(-T, T, n+1)
+        phi = np.tanh(t)
+        dphi = 1.0 / np.cosh(t)**2
+        # Mapeia para [a,b]
+        x = 0.5 * (a + b) + 0.5 * (b - a) * phi
+        # ...
+\end{lstlisting}
+
+\section{Integração Multidimensional}
+A transição das teorias fundamentais para volumes delimitados requer somas iteradas de Riemann. A arquitetura adotada parametrizou a varredura ortogonal do espaço integrando inicialmente em relação a $x$ com pesos isolados e iterando o resultado na superposição perante a dimensão $y$. 
+
+A função 2D acoplada foi implementada com uma Regra de Simpson Bidimensional otimizada. Sob $f(x,y) = xy$ integrando em matriz $1 \times 1$, o retorno $0.250000$ bate precisamente com o modelo teórico de $1/4$.
+
+\section{Conclusão}
+A exploração sistêmica promovida na Unidade 2 certifica a absoluta relevância de transitar por diferentes bases de cálculo numérico dependendo das injunções do problema. Fórmulas de Newton-Cotes apresentam grande resiliência e facilidade interpretativa para curvas comportadas; entretanto, integrandos munidos de alta oscilação ou crescimento estocástico em limites finitos clamam veementemente pela densidade das raízes ortogonais de Gauss, ou sob a iminência de polos assintóticos, pelas transformações duplas hiperbólicas.
+
+As respostas obtidas referendam de modo irrefutável a estabilidade dos módulos \textit{Python} desenvolvidos. O avanço metodológico oriundo da vetorização e das rotinas nativas abrigou as antigas dezenas de laços interativos em curtas invocações diretas de matrizes NumPy.
+
+\end{document}
